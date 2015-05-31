@@ -1,2 +1,5 @@
 # Testing File
 test.py
+
+# Compiled
+*.py[cod]

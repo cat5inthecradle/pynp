@@ -1,2 +1,2 @@
-# pynp
-Python Nodeping Library
+# PYNP - Python Nodeping API Module
+
