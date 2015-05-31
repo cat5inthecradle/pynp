@@ -47,5 +47,5 @@ class NPAccount(object):
 	def __init__(self, details):
 		self.details = details
 
-	def details(self):
-		return {'name':self.customer_name, 'customerid':self.customerid, 'parent':self.parent, 'status':self.status}
+	def get_details(self):
+		return {'name':self.details['customer_name'], '_id':self.details['_id']}
