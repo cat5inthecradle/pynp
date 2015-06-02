@@ -5,13 +5,10 @@ import requests
 
 class NodePingInterface:
 
-	accounts = {}
-	checks = {}
-
 	def __init__(self, apitoken, update = False):
 		self.apitoken = apitoken
 		if update:
-			update_all()
+			self.update_all()
 
 	def update_all(self):
 		self.update_accounts()
@@ -21,9 +18,16 @@ class NodePingInterface:
 	# -------------------------
 
 	def update_accounts(self):
-		response = self.get_accounts()
-		for customerid in response:
-			self.accounts[customerid] = NPAccount(self.get_account(customerid))
+		self.parent_account = None
+
+		accounts = self.get_accounts()
+		subaccounts = {}
+		for customerid in accounts:
+			if 'parent' in accounts[customerid]:
+				self.parent_account = NPAccount(self.get_account(customerid))
+			else:
+				subaccounts[customerid] = self.get_account(customerid)
+		self.parent_account.set_children(subaccounts)
 
 	def get_accounts(self):
 		return self.api_accounts_get()
@@ -32,7 +36,7 @@ class NodePingInterface:
 		response = self.api_accounts_get({'customerid':customerid})
 		return response
 
-	def new_account(self, name, contactname, email, timezone="-5", location="nam", emailme="no"):
+	def new_subaccount(self, name, contactname, email, timezone="-5", location="nam", emailme="no"):
 		payload = {
 			'token':self.apitoken,
 			'name':name,
@@ -43,24 +47,25 @@ class NodePingInterface:
 			'emailme':emailme
 		}
 		response = requests.post('https://api.nodeping.com/api/1/accounts', json=payload).json()
-		self.accounts[response['_id']] = NPAccount(self.get_account(response['_id']))
 		return response
 
 	# Checks
 	# --------------------------
 
 	def update_checks(self):
+		self.checks = {}
+
 		parent_checks = self.get_checks()
 		for check_id in parent_checks:
 			self.checks[check_id] = NPCheck(parent_checks[check_id])
-		for account in self.accounts:
-			account_checks = self.get_checks(self.accounts[account].details['_id'])
+		for account in self.parent_account.children:
+			account_checks = self.get_checks(self.parent_account.children[account].details['_id'])
 			for check_id in account_checks:
 				self.checks[check_id] = NPCheck(account_checks[check_id])
 
 	def get_checks(self, customerid = "", lastresult = False):
 		payload = {'lastresult':False}
-		if subaccount != "":
+		if customerid != "":
 			payload['customerid'] = customerid
 		return self.api_checks_get(payload)
 
@@ -89,17 +94,17 @@ class NPAccount(NPObject):
 	children = {}
 
 	# feed this npi.get_checks(self.details['_id'])
-	def load_checks(self, checks):
+	def set_checks(self, checks):
 		for check_id in checks:
 			self.checks[check_id] = NPCheck(checks[check_id])
 
-	def load_children(self, subaccounts):
+	def set_children(self, subaccounts):
 		for customerid in subaccounts:
-			self.children[subaccount] = NPAccount(subaccounts[customerid])
+			self.children[customerid] = NPAccount(subaccounts[customerid])
 
 	def pprint(self):
-		return "Account ID: " + self.details['_id'] + ", " + self.details['customer_name']
+		return self.details['_id'] + ", " + self.details['customer_name']
 
 class NPCheck(NPObject):
 	def pprint(self):
-		return "Check ID: " + self.details['_id'] + ", " + self.details['label']
+		return self.details['_id'] + ", " + self.details['label']
