@@ -1,48 +1,42 @@
-## pynp.py
+# pynp.py
+# author: Darin Webb @Cat5InTheCradle
 
-# http://docs.python-requests.org/en/latest/
 import requests
 
 class NodePingInterface:
 
-	accounts = {}
-
-	def __init__(self, apitoken):
+	def __init__(self, apitoken, update = False):
 		self.apitoken = apitoken
-		self.update_accounts()
+		if update:
+			self.update_all()
 
-	# curl -X GET 'https://api.nodeping.com/api/1/accounts'
+	def update_all(self):
+		self.update_accounts()
+		self.update_checks()
+
+	# Accounts
+	# -------------------------
+
 	def update_accounts(self):
-		payload = {'token':self.apitoken}
-		response = requests.get('https://api.nodeping.com/api/1/accounts', json=payload).json()
-		for customerid in response:
-			account = NPAccount(**self.get_account(customerid))
-			#response['customerid'] = customerid
-			#account = NPAccount(**data)
-			self.accounts[account.customerid] = account
+		self.parent_account = None
+
+		accounts = self.get_accounts()
+		subaccounts = {}
+		for customerid in accounts:
+			if 'parent' in accounts[customerid]:
+				self.parent_account = NPAccount(self.get_account(customerid))
+			else:
+				subaccounts[customerid] = self.get_account(customerid)
+		self.parent_account.set_children(subaccounts)
+
+	def get_accounts(self):
+		return self.api_accounts_get()
 
 	def get_account(self, customerid):
-		payload = {
-			'token':self.apitoken,
-			'customerid':customerid
-		}
-		response = requests.get('https://api.nodeping.com/api/1/accounts', json=payload).json()
+		response = self.api_accounts_get({'customerid':customerid})
 		return response
 
-
-
-	# POST - Create a new SubAccount. Note that id and customerid are not supported for POST calls on accounts.
-	# 
-    # name - required - a name for the subaccount, used primarily as a label for the accounts list.
-    # contactname - required - name of the primary contact for the subaccount
-    # email - required - email of the primary contact for the subaccount
-    # timezone - optional - GMT offset for the account (example: '-7' is US Phoenix)
-    # location - optional - The default region for checks for the account. This is a geographical region where our probe servers are located. Currently this can be set to 'nam' for North America, 'eur' for Europe, 'eao' for East Asia/Oceania, or 'wlw' for world wide.
-    # emailme - optional - set to 'yes' to opt-in the subaccount for NodePing service and features email notifications. Defaults to 'no' if absent.
-	# 
-	# curl -X POST 'https://api.nodeping.com/api/1/accounts?timezone=3&name=My+Company+Name&contactname=Joe+Smith&email=joe@example.com&timezone=3&location=eur&emailme=yes' 
-	
-	def new_account(self, name, contactname, email, timezone="-5", location="nam", emailme="no"):
+	def new_subaccount(self, name, contactname, email, timezone="-5", location="nam", emailme="no"):
 		payload = {
 			'token':self.apitoken,
 			'name':name,
@@ -53,36 +47,64 @@ class NodePingInterface:
 			'emailme':emailme
 		}
 		response = requests.post('https://api.nodeping.com/api/1/accounts', json=payload).json()
-		account = NPAccount(response)
 		return response
 
+	# Checks
+	# --------------------------
 
-class NPAccount(object):
-	
-	def __init__(self, status, sdomain, planId, creation_date, timezone, emailme, _id, type, customer_name, defaultlocations = "", parent = "", customerid = "", reports = "", modified = "", notice = "", trialend = "", promo = "", suref = "", checkcount = 0, statustime = 0, nextBillingDate = 0, billingDayOfMonth = 0, cstatus = ""):
-		self.status =  status
-		self.sdomain =  sdomain
-		self.parent =  parent
-		self.planId =  planId
-		self.defaultlocations =  defaultlocations
-		self.creation_date =  creation_date
-		self.timezone =  timezone
-		self.emailme =  emailme
-		self._id =  _id
-		self.type =  type
-		self.customerid =  customerid
-		self.customer_name = customer_name
-		self.reports = reports
-		self.modified = modified
-		self.notice = notice
-		self.trialend = trialend
-		self.promo = promo
-		self.suref = suref
-		self.checkcount = checkcount
-		self.statustime = statustime
-		self.nextBillingDate = nextBillingDate
-		self.billingDayOfMonth = billingDayOfMonth
-		self.cstatus = cstatus
+	def update_checks(self):
+		self.checks = {}
 
-	def details(self):
-		return {'name':self.customer_name, 'customerid':self.customerid, 'parent':self.parent, 'status':self.status}
+		parent_checks = self.get_checks()
+		for check_id in parent_checks:
+			self.checks[check_id] = NPCheck(parent_checks[check_id])
+		for account in self.parent_account.children:
+			account_checks = self.get_checks(self.parent_account.children[account].details['_id'])
+			for check_id in account_checks:
+				self.checks[check_id] = NPCheck(account_checks[check_id])
+
+	def get_checks(self, customerid = "", lastresult = False):
+		payload = {'lastresult':False}
+		if customerid != "":
+			payload['customerid'] = customerid
+		return self.api_checks_get(payload)
+
+	def get_check(self, check_id, current = False):
+		customerid = check_id.split('-')[0]
+		return self.api_checks_get({'customerid':customerid, 'id':check_id, 'current':False})
+
+	# API Requests
+	# ---------------------------
+
+	def api_accounts_get(self, payload = {}):
+		payload['token'] =  self.apitoken
+		return requests.get('https://api.nodeping.com/api/1/accounts', json=payload).json()
+
+	def api_checks_get(self, payload = {}):
+		payload['token'] = self.apitoken
+		return requests.get('https://api.nodeping.com/api/1/checks', json=payload).json()
+
+class NPObject(object):
+	details = {}
+	def __init__(self, details):
+		self.details = details
+
+class NPAccount(NPObject):
+	checks = {}
+	children = {}
+
+	# feed this npi.get_checks(self.details['_id'])
+	def set_checks(self, checks):
+		for check_id in checks:
+			self.checks[check_id] = NPCheck(checks[check_id])
+
+	def set_children(self, subaccounts):
+		for customerid in subaccounts:
+			self.children[customerid] = NPAccount(subaccounts[customerid])
+
+	def pprint(self):
+		return self.details['_id'] + ", " + self.details['customer_name']
+
+class NPCheck(NPObject):
+	def pprint(self):
+		return self.details['_id'] + ", " + self.details['label']
